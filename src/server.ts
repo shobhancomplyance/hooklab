@@ -1432,21 +1432,22 @@ const app = new Elysia()
         throw new Error("VERCEL_DEPLOY_HOOK_URL environment variable is not set. Create a Deploy Hook in Vercel project settings.");
       }
 
-      const triggerResponse = await fetch(deployHookUrl, { method: "POST" });
+      // Trigger new deployment in background
+      fetch(deployHookUrl, { method: "POST" }).catch(() => {});
 
-      if (!triggerResponse.ok) {
-        const errorText = await triggerResponse.text();
-        throw new Error(`Deploy Hook error: ${triggerResponse.status} - ${errorText}`);
+      // Return current URL immediately
+      const currentUrl = process.env.VERCEL_URL
+        ? (process.env.VERCEL_URL.startsWith("http") ? process.env.VERCEL_URL : `https://${process.env.VERCEL_URL}`)
+        : state.vercelDeploymentUrl;
+
+      if (!currentUrl) {
+        throw new Error("No Vercel URL available");
       }
-
-      const deployment = await triggerResponse.json() as { id: string; url: string };
-
-      state.vercelDeploymentUrl = `https://${deployment.url}`;
 
       return {
         success: true,
-        publicUrl: `${state.vercelDeploymentUrl}/webhook`,
-        deploymentId: deployment.id,
+        publicUrl: `${currentUrl}/webhook`,
+        message: "New deployment triggered. URL will update when build completes.",
       };
     } catch (error) {
       set.status = 500;
