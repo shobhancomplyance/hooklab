@@ -1492,10 +1492,18 @@ const app = new Elysia()
 
   // Get captured webhooks
   .get("/api/webhooks", () => {
+    // Always reload from file to handle Vercel serverless cold starts
+    const persisted = loadStateFromFile();
+    if (persisted && Array.isArray(persisted.webhooks)) {
+      state.webhooks = persisted.webhooks;
+    }
+    if (persisted && persisted.config) {
+      state.config = persisted.config;
+    }
     return {
       webhooks: state.webhooks.map(w => ({
         ...w,
-        rawBody: undefined, // don't send raw body to reduce payload
+        rawBody: undefined,
         secretKeyProvided: !!state.config?.secretKey,
       })),
       count: state.webhooks.length,
@@ -1504,6 +1512,17 @@ const app = new Elysia()
 
   // Status
   .get("/api/status", () => {
+    // Always reload from file to handle Vercel serverless cold starts
+    const persisted = loadStateFromFile();
+    if (persisted && Array.isArray(persisted.webhooks)) {
+      state.webhooks = persisted.webhooks;
+    }
+    if (persisted && persisted.config) {
+      state.config = persisted.config;
+    }
+    if (persisted && persisted.triggerResult) {
+      state.triggerResult = persisted.triggerResult;
+    }
     return {
       publicUrl: state.publicUrl,
       tunnelEnabled: !DISABLE_TUNNEL,
