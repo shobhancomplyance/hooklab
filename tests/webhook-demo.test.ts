@@ -4,7 +4,7 @@ import { createHmac } from "crypto";
 import {
   parseWebhookConfigInput,
   verifyCapturedWebhook,
-} from "./webhook-demo-utils";
+} from "../src/lib/webhook-utils";
 
 describe("parseWebhookConfigInput", () => {
   it("accepts webhook list responses and preserves sha512 signing config", () => {

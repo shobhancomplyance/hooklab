@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun run start.ts"
+    "start": "bun run src/server.ts",
+    "dev": "bun run src/server.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",

@@ -2,7 +2,7 @@
  * Purchase Invoice Webhook Demo Harness
  *
  * Usage:
- *   bun run tools/webhook-demo/start.ts
+ *   bun run src/server.ts
  *
  * This starts a local webhook receiver + dashboard on port 9876,
  * exposes it via a Cloudflare quick tunnel, and provides a UI to:
@@ -20,7 +20,7 @@ import {
   verifyCapturedWebhook,
   type DemoWebhookConfig,
   type DemoWebhookAlgorithm,
-} from "./webhook-demo-utils";
+} from "./lib/webhook-utils";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
