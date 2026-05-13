@@ -1130,9 +1130,15 @@ const app = new Elysia()
   // Dashboard
   .get("/", ({ set }) => {
     set.headers["content-type"] = "text/html; charset=utf-8";
-    const initialUrl = IS_VERCEL
-      ? (state.vercelDeploymentUrl || process.env.VERCEL_URL || "")
-      : state.publicUrl;
+    let initialUrl = "";
+    if (IS_VERCEL) {
+      const vercelUrl = state.vercelDeploymentUrl || process.env.VERCEL_URL;
+      if (vercelUrl) {
+        initialUrl = vercelUrl.startsWith("http") ? `${vercelUrl}/webhook` : `https://${vercelUrl}/webhook`;
+      }
+    } else if (state.publicUrl) {
+      initialUrl = `${state.publicUrl}/webhook`;
+    }
     return generateDashboard(initialUrl);
   })
 
