@@ -21,6 +21,8 @@ import {
   type DemoWebhookConfig,
   type DemoWebhookAlgorithm,
 } from "./lib/webhook-utils";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -29,6 +31,40 @@ const IS_VERCEL = Boolean(process.env.VERCEL);
 const DISABLE_TUNNEL = process.env.DISABLE_TUNNEL === "true" || IS_VERCEL;
 // API Gateway URL — the XML Composition endpoint
 const ENCORE_URL = process.env.ENCORE_URL || "https://dev.gets.complyance.io";
+
+// ─── Persistent Storage ──────────────────────────────────────────────────────
+
+const DATA_DIR = IS_VERCEL ? "/tmp/.hooklab-data" : join(process.cwd(), ".hooklab-data");
+
+function ensureDataDir() {
+  if (!existsSync(DATA_DIR)) {
+    mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+function loadStateFromFile() {
+  try {
+    ensureDataDir();
+    const filePath = join(DATA_DIR, "state.json");
+    if (existsSync(filePath)) {
+      const raw = readFileSync(filePath, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch {
+    // ignore parse errors — start fresh
+  }
+  return null;
+}
+
+function saveStateToFile(data: unknown) {
+  try {
+    ensureDataDir();
+    const filePath = join(DATA_DIR, "state.json");
+    writeFileSync(filePath, JSON.stringify(data, null, 2));
+  } catch {
+    // ignore write errors
+  }
+}
 
 // ─── In-memory store ─────────────────────────────────────────────────────────
 
@@ -55,6 +91,20 @@ const state = {
   tunnelProc: null as { kill: () => void } | null,
   vercelDeploymentUrl: "",
 };
+
+// Load persisted state on startup
+const persistedState = loadStateFromFile();
+if (persistedState) {
+  if (Array.isArray(persistedState.webhooks)) {
+    state.webhooks = persistedState.webhooks;
+  }
+  if (persistedState.config) {
+    state.config = persistedState.config;
+  }
+  if (persistedState.triggerResult) {
+    state.triggerResult = persistedState.triggerResult;
+  }
+}
 
 // ─── SBD XML Sample (UAE Purchase Invoice) ───────────────────────────────────
 
@@ -1184,6 +1234,12 @@ const app = new Elysia()
       state.webhooks = state.webhooks.slice(0, 50);
     }
 
+    saveStateToFile({
+      webhooks: state.webhooks,
+      config: state.config,
+      triggerResult: state.triggerResult,
+    });
+
     console.log(`Webhook received: ${headers["x-webhook-event"] || "unknown"} | HMAC: ${verification.hmacVerified === true ? "PASS" : verification.hmacVerified === false ? "FAIL" : "N/A"}`);
 
     set.status = 200;
@@ -1211,6 +1267,12 @@ const app = new Elysia()
       } else {
         throw new Error("Provide config JSON or load config first before updating secret key");
       }
+
+      saveStateToFile({
+        webhooks: state.webhooks,
+        config: state.config,
+        triggerResult: state.triggerResult,
+      });
 
       set.status = 200;
       return {
@@ -1364,6 +1426,11 @@ const app = new Elysia()
             message: failureMessage,
             data: responseData,
           };
+          saveStateToFile({
+            webhooks: state.webhooks,
+            config: state.config,
+            triggerResult: state.triggerResult,
+          });
           return {
             success: true,
             message:
@@ -1375,18 +1442,33 @@ const app = new Elysia()
         }
 
         state.triggerResult = { success: true, message: "Event processed by XML Composition. Webhook should arrive shortly.", data: responseData };
+        saveStateToFile({
+          webhooks: state.webhooks,
+          config: state.config,
+          triggerResult: state.triggerResult,
+        });
         return { success: true, message: "Event sent to XML Composition pipeline. Webhook should arrive within seconds.", data: responseData };
       } else {
         const errorMsg = typeof responseData === "object" && responseData !== null
           ? JSON.stringify(responseData)
           : responseText;
         state.triggerResult = { success: false, message: `HTTP ${response.status}: ${errorMsg}` };
+        saveStateToFile({
+          webhooks: state.webhooks,
+          config: state.config,
+          triggerResult: state.triggerResult,
+        });
         set.status = response.status;
         return { success: false, message: `HTTP ${response.status}: ${errorMsg}`, data: responseData };
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       state.triggerResult = { success: false, message };
+      saveStateToFile({
+        webhooks: state.webhooks,
+        config: state.config,
+        triggerResult: state.triggerResult,
+      });
       set.status = 500;
       return { success: false, message: `Network error: ${message}` };
     }
