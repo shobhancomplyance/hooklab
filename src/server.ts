@@ -1011,9 +1011,13 @@ interface VercelDeploymentResult {
 async function createVercelDeployment(projectName: string): Promise<VercelDeploymentResult> {
   const vercelToken = process.env.VERCEL_API_TOKEN;
   const vercelTeamId = process.env.VERCEL_TEAM_ID;
+  const repoId = process.env.VERCEL_GIT_REPO_ID;
 
   if (!vercelToken) {
     throw new Error("VERCEL_API_TOKEN is not set");
+  }
+  if (!repoId) {
+    throw new Error("VERCEL_GIT_REPO_ID is not set");
   }
 
   const headers: Record<string, string> = {
@@ -1032,9 +1036,8 @@ async function createVercelDeployment(projectName: string): Promise<VercelDeploy
     body: JSON.stringify({
       gitSource: {
         type: "github",
-        repo: `hooklab`,
+        repoId,
         ref: "main",
-        sha: "HEAD",
       },
       project: projectName,
       target: "production",
@@ -1421,9 +1424,13 @@ const app = new Elysia()
     try {
       const vercelToken = process.env.VERCEL_API_TOKEN;
       const projectName = process.env.VERCEL_GIT_REPO_SLUG || process.env.VERCEL_PROJECT_NAME || "hooklab";
+      const repoId = process.env.VERCEL_GIT_REPO_ID;
 
       if (!vercelToken) {
         throw new Error("VERCEL_API_TOKEN environment variable is not set");
+      }
+      if (!repoId) {
+        throw new Error("VERCEL_GIT_REPO_ID environment variable is not set");
       }
 
       const teamId = process.env.VERCEL_TEAM_ID;
@@ -1443,9 +1450,8 @@ const app = new Elysia()
         body: JSON.stringify({
           gitSource: {
             type: "github",
-            repo: "hooklab",
+            repoId,
             ref: branchName,
-            sha: "HEAD",
           },
           project: projectName,
         }),
