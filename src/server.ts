@@ -840,6 +840,20 @@ function generateDashboard(publicUrl: string): string {
     pollStatus();
     setInterval(pollStatus, 2000);
 
+    // Restore configLoaded state from server on page load
+    (async function restoreState() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.configLoaded) {
+          configLoaded = true;
+          updateTriggerBtn();
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
     function toggleTokenVisibility(btn) {
       const input = document.getElementById('bearerToken');
       if (input.type === 'password') {
@@ -1264,6 +1278,8 @@ const app = new Elysia()
           ...state.config,
           secretKey: providedSecretKey,
         };
+      } else if (providedSecretKey && !state.config) {
+        throw new Error("Load config JSON first, then you can update the secret key separately");
       } else {
         throw new Error("Provide config JSON or load config first before updating secret key");
       }
