@@ -1130,7 +1130,10 @@ const app = new Elysia()
   // Dashboard
   .get("/", ({ set }) => {
     set.headers["content-type"] = "text/html; charset=utf-8";
-    return generateDashboard(state.publicUrl);
+    const initialUrl = IS_VERCEL
+      ? (state.vercelDeploymentUrl || process.env.VERCEL_URL || "")
+      : state.publicUrl;
+    return generateDashboard(initialUrl);
   })
 
   // Webhook receiver — this is the endpoint the platform will POST to
@@ -1423,48 +1426,20 @@ const app = new Elysia()
     }
 
     try {
-      const vercelToken = process.env.VERCEL_API_TOKEN;
-      const projectName = process.env.VERCEL_GIT_REPO_SLUG || process.env.VERCEL_PROJECT_NAME || "hooklab";
-      const repoId = process.env.VERCEL_GIT_REPO_ID;
+      const deployHookUrl = process.env.VERCEL_DEPLOY_HOOK_URL;
 
-      if (!vercelToken) {
-        throw new Error("VERCEL_API_TOKEN environment variable is not set");
-      }
-      if (!repoId) {
-        throw new Error("VERCEL_GIT_REPO_ID environment variable is not set");
+      if (!deployHookUrl) {
+        throw new Error("VERCEL_DEPLOY_HOOK_URL environment variable is not set. Create a Deploy Hook in Vercel project settings.");
       }
 
-      const teamId = process.env.VERCEL_TEAM_ID;
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${vercelToken}`,
-        "Content-Type": "application/json",
-      };
-      if (teamId) {
-        headers["X-Vercel-Team-Id"] = teamId;
+      const triggerResponse = await fetch(deployHookUrl, { method: "POST" });
+
+      if (!triggerResponse.ok) {
+        const errorText = await triggerResponse.text();
+        throw new Error(`Deploy Hook error: ${triggerResponse.status} - ${errorText}`);
       }
 
-      const branchName = `refresh-${Date.now()}`;
-
-      const createResponse = await fetch("https://api.vercel.com/v13/deployments", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          gitSource: {
-            type: "github",
-            repoId,
-            name: projectName,
-            ref: branchName,
-          },
-          project: projectName,
-        }),
-      });
-
-      if (!createResponse.ok) {
-        const errorText = await createResponse.text();
-        throw new Error(`Vercel API error: ${createResponse.status} - ${errorText}`);
-      }
-
-      const deployment = await createResponse.json() as { id: string; url: string };
+      const deployment = await triggerResponse.json() as { id: string; url: string };
 
       state.vercelDeploymentUrl = `https://${deployment.url}`;
 
@@ -1484,11 +1459,12 @@ const app = new Elysia()
 
   // Get current public URL (works for both local tunnel and Vercel)
   .get("/api/public-url", () => {
-    if (IS_VERCEL && state.vercelDeploymentUrl) {
-      return {
-        url: `${state.vercelDeploymentUrl}/webhook`,
-        source: "vercel",
-      };
+    if (IS_VERCEL) {
+      const vercelUrl = state.vercelDeploymentUrl || process.env.VERCEL_URL;
+      if (vercelUrl) {
+        const url = vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
+        return { url: `${url}/webhook`, source: "vercel" };
+      }
     }
     return {
       url: state.publicUrl ? `${state.publicUrl}/webhook` : null,
