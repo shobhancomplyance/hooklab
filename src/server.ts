@@ -1037,6 +1037,7 @@ async function createVercelDeployment(projectName: string): Promise<VercelDeploy
       gitSource: {
         type: "github",
         repoId,
+        name: projectName,
         ref: "main",
       },
       project: projectName,
@@ -1451,6 +1452,7 @@ const app = new Elysia()
           gitSource: {
             type: "github",
             repoId,
+            name: projectName,
             ref: branchName,
           },
           project: projectName,
