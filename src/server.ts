@@ -175,8 +175,8 @@ function buildSampleSbdXml(): string {
   const invoiceId = `PI-${uniqueId}`;
 
   return SAMPLE_SBD_XML
-    .replaceAll("SBD-DEMO-2026-0042", instanceId)
-    .replaceAll("PI-2026-0042", invoiceId);
+    .split("SBD-DEMO-2026-0042").join(instanceId)
+    .split("PI-2026-0042").join(invoiceId);
 }
 
 // ─── Dashboard HTML ──────────────────────────────────────────────────────────
@@ -963,9 +963,17 @@ function generateDashboard(publicUrl: string): string {
 
 async function startCloudflareTunnel(port: number): Promise<string> {
   console.log("Starting cloudflared quick tunnel...");
+  const bunRuntime = (globalThis as { Bun?: unknown }).Bun as
+    | { spawn: (options: { cmd: string[]; stdout: "pipe" }) => { stdout: ReadableStream<Uint8Array>; kill: () => void } }
+    | undefined;
+
+  if (!bunRuntime) {
+    throw new Error("Cloudflare tunnel startup is only supported in Bun runtime");
+  }
+
   try {
     // Use shell to redirect stderr to stdout so we can read the URL from combined output
-    const proc = Bun.spawn({
+    const proc = bunRuntime.spawn({
       cmd: ["sh", "-c", `cloudflared tunnel --url http://localhost:${port} --loglevel info 2>&1`],
       stdout: "pipe",
     });
@@ -1011,7 +1019,7 @@ async function startCloudflareTunnel(port: number): Promise<string> {
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 const app = new Elysia()
-  .use(cors({ parseBody: false }))
+  .use(cors())
 
   // Dashboard
   .get("/", ({ set }) => {
