@@ -53,6 +53,7 @@ const state = {
   publicUrl: "",
   triggerResult: null as null | { success: boolean; message: string; data?: unknown },
   tunnelProc: null as { kill: () => void } | null,
+  vercelDeploymentUrl: "",
 };
 
 // ─── SBD XML Sample (UAE Purchase Invoice) ───────────────────────────────────
@@ -746,7 +747,7 @@ function generateDashboard(publicUrl: string): string {
 
     async function copyUrl(btn) {
       const url = document.getElementById('publicUrl').textContent;
-      await navigator.clipboard.writeText(url + '/webhook');
+      await navigator.clipboard.writeText(url);
       btn.textContent = 'Copied!';
       setTimeout(() => btn.textContent = 'Copy URL', 2000);
     }
@@ -755,14 +756,14 @@ function generateDashboard(publicUrl: string): string {
       btn.disabled = true;
       btn.textContent = 'Refreshing...';
       const publicUrlEl = document.getElementById('publicUrl');
-      publicUrlEl.textContent = 'Waiting for tunnel...';
+      publicUrlEl.textContent = 'Creating new URL...';
       try {
-        const res = await fetch('/api/restart-tunnel', { method: 'POST' });
+        const res = await fetch('/api/new-vercel-url', { method: 'POST' });
         const data = await res.json();
         if (data.success) {
           publicUrlEl.textContent = data.publicUrl;
         } else {
-          publicUrlEl.textContent = 'Failed to get new URL';
+          publicUrlEl.textContent = 'Failed: ' + (data.message || 'Unknown error');
         }
       } catch {
         publicUrlEl.textContent = 'Failed to get new URL';
@@ -773,9 +774,18 @@ function generateDashboard(publicUrl: string): string {
 
     async function pollStatus() {
       try {
-        const res = await fetch('/api/status');
+        const res = await fetch('/api/public-url');
         const data = await res.json();
-        if (data.publicUrl) {
+        if (data.url) {
+          const publicUrlEl = document.getElementById('publicUrl');
+          if (!publicUrlEl.textContent || publicUrlEl.textContent === 'Waiting for tunnel...' || publicUrlEl.textContent.startsWith('Creating')) {
+            publicUrlEl.textContent = data.url;
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }
           const publicUrlEl = document.getElementById('publicUrl');
           if (publicUrlEl.textContent === 'Waiting for tunnel...' || !publicUrlEl.textContent) {
             publicUrlEl.textContent = data.publicUrl;
@@ -997,6 +1007,64 @@ function generateDashboard(publicUrl: string): string {
   </script>
 </body>
 </html>`;
+}
+
+// ─── Vercel Deployment ───────────────────────────────────────────────────────
+
+interface VercelDeploymentResult {
+  url: string;
+  id: string;
+  name: string;
+}
+
+async function createVercelDeployment(projectName: string): Promise<VercelDeploymentResult> {
+  const vercelToken = process.env.VERCEL_API_TOKEN;
+  const vercelTeamId = process.env.VERCEL_TEAM_ID;
+
+  if (!vercelToken) {
+    throw new Error("VERCEL_API_TOKEN is not set");
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${vercelToken}`,
+    "Content-Type": "application/json",
+  };
+
+  if (vercelTeamId) {
+    headers["X-Vercel-Team-Id"] = vercelTeamId;
+  }
+
+  // Create new deployment
+  const createResponse = await fetch("https://api.vercel.com/v13/deployments", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      gitSource: {
+        type: "github",
+        repo: `hooklab`,
+        ref: "main",
+        sha: "HEAD",
+      },
+      project: projectName,
+      target: "production",
+    }),
+  });
+
+  if (!createResponse.ok) {
+    const error = await createResponse.text();
+    throw new Error(`Failed to create deployment: ${error}`);
+  }
+
+  const deployment = await createResponse.json() as { id: string; url: string; name: string };
+
+  // Wait for deployment to be ready
+  const deploymentUrl = `https://${deployment.url}`;
+
+  return {
+    url: deploymentUrl,
+    id: deployment.id,
+    name: deployment.name,
+  };
 }
 
 // ─── Cloudflare Setup ────────────────────────────────────────────────────────
@@ -1352,25 +1420,60 @@ const app = new Elysia()
     };
   })
 
-  // Restart tunnel to get a new URL
-  .post("/api/restart-tunnel", async ({ set }) => {
-    if (DISABLE_TUNNEL) {
+  // Create new Vercel deployment for fresh URL
+  .post("/api/new-vercel-url", async ({ set }) => {
+    if (!IS_VERCEL) {
       set.status = 400;
-      return { success: false, message: "Tunnel is disabled" };
+      return { success: false, message: "Only available on Vercel deployment" };
     }
 
     try {
-      if (state.tunnelProc) {
-        state.tunnelProc.kill();
-        state.tunnelProc = null;
-        state.publicUrl = "";
+      const vercelToken = process.env.VERCEL_API_TOKEN;
+      const projectName = process.env.VERCEL_GIT_REPO_SLUG || process.env.VERCEL_PROJECT_NAME || "hooklab";
+
+      if (!vercelToken) {
+        throw new Error("VERCEL_API_TOKEN environment variable is not set");
       }
 
-      const result = await startCloudflareTunnel(DEMO_PORT);
-      state.publicUrl = result.url;
-      state.tunnelProc = result.proc;
+      const teamId = process.env.VERCEL_TEAM_ID;
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${vercelToken}`,
+        "Content-Type": "application/json",
+      };
+      if (teamId) {
+        headers["X-Vercel-Team-Id"] = teamId;
+      }
 
-      return { success: true, publicUrl: result.url };
+      const branchName = `refresh-${Date.now()}`;
+
+      const createResponse = await fetch("https://api.vercel.com/v13/deployments", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          gitSource: {
+            type: "github",
+            repo: "hooklab",
+            ref: branchName,
+            sha: "HEAD",
+          },
+          project: projectName,
+        }),
+      });
+
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text();
+        throw new Error(`Vercel API error: ${createResponse.status} - ${errorText}`);
+      }
+
+      const deployment = await createResponse.json() as { id: string; url: string };
+
+      state.vercelDeploymentUrl = `https://${deployment.url}`;
+
+      return {
+        success: true,
+        publicUrl: `${state.vercelDeploymentUrl}/webhook`,
+        deploymentId: deployment.id,
+      };
     } catch (error) {
       set.status = 500;
       return {
@@ -1378,6 +1481,20 @@ const app = new Elysia()
         message: error instanceof Error ? error.message : String(error),
       };
     }
+  })
+
+  // Get current public URL (works for both local tunnel and Vercel)
+  .get("/api/public-url", () => {
+    if (IS_VERCEL && state.vercelDeploymentUrl) {
+      return {
+        url: `${state.vercelDeploymentUrl}/webhook`,
+        source: "vercel",
+      };
+    }
+    return {
+      url: state.publicUrl ? `${state.publicUrl}/webhook` : null,
+      source: state.publicUrl ? "tunnel" : null,
+    };
   })
 
 export default app;
