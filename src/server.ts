@@ -786,15 +786,6 @@ function generateDashboard(publicUrl: string): string {
         // ignore polling errors
       }
     }
-          const publicUrlEl = document.getElementById('publicUrl');
-          if (publicUrlEl.textContent === 'Waiting for tunnel...' || !publicUrlEl.textContent) {
-            publicUrlEl.textContent = data.publicUrl;
-          }
-        }
-      } catch {
-        // ignore polling errors
-      }
-    }
 
     pollStatus();
     setInterval(pollStatus, 2000);
