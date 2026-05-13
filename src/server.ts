@@ -52,6 +52,7 @@ const state = {
   webhooks: [] as CapturedWebhook[],
   publicUrl: "",
   triggerResult: null as null | { success: boolean; message: string; data?: unknown },
+  tunnelProc: null as { kill: () => void } | null,
 };
 
 // ─── SBD XML Sample (UAE Purchase Invoice) ───────────────────────────────────
@@ -685,6 +686,7 @@ function generateDashboard(publicUrl: string): string {
             <div class="url-box">
               <span class="url-text" id="publicUrl">${publicUrl || "Waiting for tunnel..."}</span>
               <button class="btn btn-secondary" onclick="copyUrl(this)">Copy URL</button>
+              <button class="btn btn-secondary" onclick="refreshTunnel(this)" title="Get new tunnel URL">Refresh</button>
             </div>
             <div class="section-divider"></div>
             <textarea id="configJson" placeholder='{"success": true, "message": "...", "webhook": {...}}'></textarea>
@@ -748,6 +750,44 @@ function generateDashboard(publicUrl: string): string {
       btn.textContent = 'Copied!';
       setTimeout(() => btn.textContent = 'Copy URL', 2000);
     }
+
+    async function refreshTunnel(btn) {
+      btn.disabled = true;
+      btn.textContent = 'Refreshing...';
+      const publicUrlEl = document.getElementById('publicUrl');
+      publicUrlEl.textContent = 'Waiting for tunnel...';
+      try {
+        const res = await fetch('/api/restart-tunnel', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          publicUrlEl.textContent = data.publicUrl;
+        } else {
+          publicUrlEl.textContent = 'Failed to get new URL';
+        }
+      } catch {
+        publicUrlEl.textContent = 'Failed to get new URL';
+      }
+      btn.disabled = false;
+      btn.textContent = 'Refresh';
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.publicUrl) {
+          const publicUrlEl = document.getElementById('publicUrl');
+          if (publicUrlEl.textContent === 'Waiting for tunnel...' || !publicUrlEl.textContent) {
+            publicUrlEl.textContent = data.publicUrl;
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }
+
+    pollStatus();
+    setInterval(pollStatus, 2000);
 
     function toggleTokenVisibility(btn) {
       const input = document.getElementById('bearerToken');
@@ -961,7 +1001,12 @@ function generateDashboard(publicUrl: string): string {
 
 // ─── Cloudflare Setup ────────────────────────────────────────────────────────
 
-async function startCloudflareTunnel(port: number): Promise<string> {
+interface TunnelResult {
+  url: string;
+  proc: { kill: () => void };
+}
+
+async function startCloudflareTunnel(port: number): Promise<TunnelResult> {
   console.log("Starting cloudflared quick tunnel...");
   const bunRuntime = (globalThis as { Bun?: unknown }).Bun as
     | { spawn: (options: { cmd: string[]; stdout: "pipe" }) => { stdout: ReadableStream<Uint8Array>; kill: () => void } }
@@ -972,7 +1017,6 @@ async function startCloudflareTunnel(port: number): Promise<string> {
   }
 
   try {
-    // Use shell to redirect stderr to stdout so we can read the URL from combined output
     const proc = bunRuntime.spawn({
       cmd: ["sh", "-c", `cloudflared tunnel --url http://localhost:${port} --loglevel info 2>&1`],
       stdout: "pipe",
@@ -995,12 +1039,11 @@ async function startCloudflareTunnel(port: number): Promise<string> {
             const text = decoder.decode(value, { stream: true });
             process.stdout.write(text);
 
-            // Cloudflared outputs URL: |  https://xxx.trycloudflare.com |
             const urlMatch = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
             if (urlMatch) {
               clearTimeout(timeout);
               console.log(`\ncloudflared tunnel started: ${urlMatch[0]}`);
-              resolve(urlMatch[0]);
+              resolve({ url: urlMatch[0], proc });
               return;
             }
           }
@@ -1307,7 +1350,35 @@ const app = new Elysia()
       webhookCount: state.webhooks.length,
       triggerResult: state.triggerResult,
     };
-  });
+  })
+
+  // Restart tunnel to get a new URL
+  .post("/api/restart-tunnel", async ({ set }) => {
+    if (DISABLE_TUNNEL) {
+      set.status = 400;
+      return { success: false, message: "Tunnel is disabled" };
+    }
+
+    try {
+      if (state.tunnelProc) {
+        state.tunnelProc.kill();
+        state.tunnelProc = null;
+        state.publicUrl = "";
+      }
+
+      const result = await startCloudflareTunnel(DEMO_PORT);
+      state.publicUrl = result.url;
+      state.tunnelProc = result.proc;
+
+      return { success: true, publicUrl: result.url };
+    } catch (error) {
+      set.status = 500;
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
 
 export default app;
 
@@ -1323,16 +1394,17 @@ if (!IS_VERCEL) {
 if (!DISABLE_TUNNEL) {
   setTimeout(async () => {
     try {
-      const url = await startCloudflareTunnel(DEMO_PORT);
-      state.publicUrl = url;
+      const result = await startCloudflareTunnel(DEMO_PORT);
+      state.publicUrl = result.url;
+      state.tunnelProc = result.proc;
       console.log(`\n${"=".repeat(60)}`);
-      console.log(`  Public Webhook URL: ${url}/webhook`);
-      console.log(`  Dashboard: ${url}`);
+      console.log(`  Public Webhook URL: ${result.url}/webhook`);
+      console.log(`  Dashboard: ${result.url}`);
       console.log(`  Local Dashboard: http://localhost:${DEMO_PORT}`);
       console.log(`${"=".repeat(60)}\n`);
       console.log("Steps:");
       console.log("  1. Go to dev.gets.complyance.io -> Webhooks -> Create Webhook");
-      console.log(`  2. Use this URL: ${url}/webhook`);
+      console.log(`  2. Use this URL: ${result.url}/webhook`);
       console.log("  3. Enable HMAC signing and copy the secret");
       console.log("  4. Open the dashboard and paste the webhook config JSON");
       console.log("  5. Enter your Bearer token and click Trigger");
