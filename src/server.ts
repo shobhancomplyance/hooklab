@@ -1474,10 +1474,6 @@ const app = new Elysia()
         return { url: `${protocol}://${host}/webhook`, source: "vercel" };
       }
     }
-        const url = vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
-        return { url: `${url}/webhook`, source: "vercel" };
-      }
-    }
     return {
       url: state.publicUrl ? `${state.publicUrl}/webhook` : null,
       source: state.publicUrl ? "tunnel" : null,
