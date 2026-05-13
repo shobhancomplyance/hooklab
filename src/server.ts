@@ -1128,13 +1128,14 @@ const app = new Elysia()
   .use(cors())
 
   // Dashboard
-  .get("/", ({ set }) => {
+  .get("/", ({ request, set }) => {
     set.headers["content-type"] = "text/html; charset=utf-8";
     let initialUrl = "";
     if (IS_VERCEL) {
-      const vercelUrl = state.vercelDeploymentUrl || process.env.VERCEL_URL;
-      if (vercelUrl) {
-        initialUrl = vercelUrl.startsWith("http") ? `${vercelUrl}/webhook` : `https://${vercelUrl}/webhook`;
+      const host = request.headers.get("host");
+      const protocol = request.headers.get("x-forwarded-proto") || "https";
+      if (host) {
+        initialUrl = `${protocol}://${host}/webhook`;
       }
     } else if (state.publicUrl) {
       initialUrl = `${state.publicUrl}/webhook`;
@@ -1425,7 +1426,7 @@ const app = new Elysia()
   })
 
   // Create new Vercel deployment for fresh URL
-  .post("/api/new-vercel-url", async ({ set }) => {
+  .post("/api/new-vercel-url", async ({ request, set }) => {
     if (!IS_VERCEL) {
       set.status = 400;
       return { success: false, message: "Only available on Vercel deployment" };
@@ -1441,10 +1442,10 @@ const app = new Elysia()
       // Trigger new deployment in background
       fetch(deployHookUrl, { method: "POST" }).catch(() => {});
 
-      // Return current URL immediately
-      const currentUrl = process.env.VERCEL_URL
-        ? (process.env.VERCEL_URL.startsWith("http") ? process.env.VERCEL_URL : `https://${process.env.VERCEL_URL}`)
-        : state.vercelDeploymentUrl;
+      // Get current URL from request host header
+      const host = request.headers.get("host");
+      const protocol = request.headers.get("x-forwarded-proto") || "https";
+      const currentUrl = host ? `${protocol}://${host}` : state.vercelDeploymentUrl;
 
       if (!currentUrl) {
         throw new Error("No Vercel URL available");
@@ -1465,10 +1466,14 @@ const app = new Elysia()
   })
 
   // Get current public URL (works for both local tunnel and Vercel)
-  .get("/api/public-url", () => {
+  .get("/api/public-url", ({ request }) => {
     if (IS_VERCEL) {
-      const vercelUrl = state.vercelDeploymentUrl || process.env.VERCEL_URL;
-      if (vercelUrl) {
+      const host = request.headers.get("host");
+      const protocol = request.headers.get("x-forwarded-proto") || "https";
+      if (host) {
+        return { url: `${protocol}://${host}/webhook`, source: "vercel" };
+      }
+    }
         const url = vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
         return { url: `${url}/webhook`, source: "vercel" };
       }
