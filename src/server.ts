@@ -24,7 +24,9 @@ import {
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const DEMO_PORT = 9876;
+const DEMO_PORT = Number(process.env.PORT || 9876);
+const IS_VERCEL = Boolean(process.env.VERCEL);
+const DISABLE_TUNNEL = process.env.DISABLE_TUNNEL === "true" || IS_VERCEL;
 // API Gateway URL — the XML Composition endpoint
 const ENCORE_URL = process.env.ENCORE_URL || "https://dev.gets.complyance.io";
 
@@ -1282,6 +1284,7 @@ const app = new Elysia()
   .get("/api/status", () => {
     return {
       publicUrl: state.publicUrl,
+      tunnelEnabled: !DISABLE_TUNNEL,
       configLoaded: !!state.config,
       config: state.config ? {
         clientId: state.config.clientId,
@@ -1296,38 +1299,42 @@ const app = new Elysia()
       webhookCount: state.webhooks.length,
       triggerResult: state.triggerResult,
     };
-  })
+  });
 
-  .listen(DEMO_PORT, () => {
+export default app;
+
+if (!IS_VERCEL) {
+  app.listen(DEMO_PORT, () => {
     console.log(`\n${"=".repeat(60)}`);
     console.log(`  Purchase Invoice Webhook Demo Harness`);
     console.log(`  Dashboard: http://localhost:${DEMO_PORT}`);
     console.log(`${"=".repeat(60)}\n`);
   });
+}
 
-// ─── Start Cloudflare tunnel after server is ready ───────────────────────────
-
-setTimeout(async () => {
-  try {
-    const url = await startCloudflareTunnel(DEMO_PORT);
-    state.publicUrl = url;
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`  🌐 Public Webhook URL: ${url}/webhook`);
-    console.log(`  📊 Dashboard: ${url}`);
-    console.log(`  💡 Local Dashboard: http://localhost:${DEMO_PORT}`);
-    console.log(`${"=".repeat(60)}\n`);
-    console.log("Steps:");
-    console.log("  1. Go to dev.gets.complyance.io → Webhooks → Create Webhook");
-    console.log(`  2. Use this URL: ${url}/webhook`);
-    console.log("  3. Enable HMAC signing and copy the secret");
-    console.log("  4. Open the dashboard and paste the webhook config JSON");
-    console.log("  5. Enter your Bearer token and click Trigger");
-    console.log("");
-  } catch (e) {
-    console.error("Failed to start tunnel:", e);
-    console.log("\nYou can still use the local dashboard at http://localhost:" + DEMO_PORT);
-    console.log("For external testing, install cloudflared and rerun:");
-    console.log("  bun run tools/webhook-demo/start.ts");
-    console.log("");
-  }
-}, 1000);
+if (!DISABLE_TUNNEL) {
+  setTimeout(async () => {
+    try {
+      const url = await startCloudflareTunnel(DEMO_PORT);
+      state.publicUrl = url;
+      console.log(`\n${"=".repeat(60)}`);
+      console.log(`  Public Webhook URL: ${url}/webhook`);
+      console.log(`  Dashboard: ${url}`);
+      console.log(`  Local Dashboard: http://localhost:${DEMO_PORT}`);
+      console.log(`${"=".repeat(60)}\n`);
+      console.log("Steps:");
+      console.log("  1. Go to dev.gets.complyance.io -> Webhooks -> Create Webhook");
+      console.log(`  2. Use this URL: ${url}/webhook`);
+      console.log("  3. Enable HMAC signing and copy the secret");
+      console.log("  4. Open the dashboard and paste the webhook config JSON");
+      console.log("  5. Enter your Bearer token and click Trigger");
+      console.log("");
+    } catch (e) {
+      console.error("Failed to start tunnel:", e);
+      console.log("\nYou can still use the local dashboard at http://localhost:" + DEMO_PORT);
+      console.log("For external testing, install cloudflared and rerun:");
+      console.log("  bun run src/server.ts");
+      console.log("");
+    }
+  }, 1000);
+}
